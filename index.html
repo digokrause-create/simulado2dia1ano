@@ -32,7 +32,7 @@
             </div>
 
             <button onclick="iniciarProva()" class="bg-red-600 text-white px-6 py-3 rounded hover:bg-red-900 font-bold w-full transition-colors">
-                Entrar em Tela Cheia e Iniciar
+                Entrar e Iniciar
             </button>
         </div>
     </div>
@@ -769,6 +769,7 @@
                 return;
             }
 
+            // Preenche os dados ocultos e do cabeçalho
             document.getElementById('nome-hidden').value = nomeInput;
             document.getElementById('turma-hidden').value = turmaInput;
             document.getElementById('ra-hidden').value = raInput;
@@ -777,23 +778,28 @@
             document.getElementById('display-turma').innerText = turmaInput;
             document.getElementById('display-ra').innerText = raInput;
 
-            document.documentElement.requestFullscreen().then(() => {
-                document.getElementById('tela-inicial').style.display = 'none';
-                
-                // LIBERA A ROLAGEM DA PÁGINA
-                document.body.classList.remove('h-screen', 'overflow-hidden');
-                document.body.classList.add('min-h-screen');
+            // 1. MUDA DE TELA PRIMEIRO (Garante que o aluno vai para a prova)
+            document.getElementById('tela-inicial').style.display = 'none';
+            
+            // 2. LIBERA A ROLAGEM DA PÁGINA
+            document.body.classList.remove('h-screen', 'overflow-hidden');
+            document.body.classList.add('min-h-screen');
 
-                document.getElementById('tela-prova').style.display = 'block';
-                provaIniciada = true;
-                
-                setTimeout(() => {
-                    sistemaAntiColaAtivo = true;
-                }, 500);
+            // 3. MOSTRA A PROVA
+            document.getElementById('tela-prova').style.display = 'block';
+            provaIniciada = true;
 
-            }).catch((err) => {
-                alert(`Erro ao abrir tela cheia: Seu navegador bloqueou a ação. Clique em qualquer lugar na tela e tente novamente.`);
-            });
+            // 4. TENTA ENTRAR EM TELA CHEIA (Com proteção contra erros de navegadores incompatíveis)
+            if (document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().catch((err) => {
+                    console.log("Aviso: Navegador não permitiu tela cheia automática, mas a prova seguirá normalmente.");
+                });
+            }
+
+            // 5. ATIVA O ANTI-COLA DEPOIS DE 1 SEGUNDO
+            setTimeout(() => {
+                sistemaAntiColaAtivo = true;
+            }, 1000);
         }
 
         // --- SISTEMA DE ANULAÇÃO BLINDADO COM TENTATIVAS ---
@@ -837,6 +843,7 @@
                 dadosAnulada.append('nota', 'ANULADA'); 
                 dadosAnulada.append('infracoes', infracoesCometidas);
                 dadosAnulada.append('ra', raAluno);
+                dadosAnulada.append('resumo_respostas', 'PROVA ANULADA - SEM CORREÇÃO');
 
                 fetch(scriptURL, { method: 'POST', mode: 'no-cors', body: dadosAnulada })
                     .catch(err => console.error("Erro na anulação:", err));
@@ -852,16 +859,23 @@
 
         // --- FUNÇÃO PARA RETORNAR A TELA CHEIA VIA CLIQUE NO MODAL ---
         function voltarParaProva() {
-            document.documentElement.requestFullscreen().then(() => {
-                document.getElementById('modal-aviso').style.display = 'none';
-                
-                // Reativa o sistema anti-cola após 1 segundo (dá tempo do navegador entrar em tela cheia)
-                setTimeout(() => {
-                    sistemaAntiColaAtivo = true;
-                }, 1000);
-            }).catch(err => {
-                alert("O navegador bloqueou a tela cheia. Clique OK e tente novamente.");
-            });
+            if (document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().then(() => {
+                    fecharModalEReativar();
+                }).catch(err => {
+                    fecharModalEReativar();
+                });
+            } else {
+                fecharModalEReativar();
+            }
+        }
+
+        function fecharModalEReativar() {
+            document.getElementById('modal-aviso').style.display = 'none';
+            // Reativa o sistema anti-cola após 1 segundo
+            setTimeout(() => {
+                sistemaAntiColaAtivo = true;
+            }, 1000);
         }
 
         // --- GATILHOS DO SENSOR ANTI-COLA ---
@@ -896,10 +910,19 @@
 
             const form = document.getElementById('form-prova');
             const dados = new FormData(form);
+            
             let nota = 0;
+            let resumoRespostas = [];
 
             for (let [questao, respostaCerta] of Object.entries(gabarito)) {
-                if (dados.get(questao) === respostaCerta) { nota++; }
+                let respostaAluno = dados.get(questao);
+                
+                if (respostaAluno === respostaCerta) { 
+                    nota++; 
+                    resumoRespostas.push(`${questao.toUpperCase()}: Acertou`);
+                } else {
+                    resumoRespostas.push(`${questao.toUpperCase()}: Errou (Marcou ${respostaAluno || 'Vazio'})`);
+                }
             }
 
             const nomeAluno = document.getElementById('nome-hidden').value;
@@ -924,6 +947,7 @@
             dadosParaEnviar.append('nota', nota);
             dadosParaEnviar.append('infracoes', infracoesCometidas); // Registra quantas infrações ele teve na entrega final
             dadosParaEnviar.append('ra', raAluno);
+            dadosParaEnviar.append('resumo_respostas', resumoRespostas.join(' | '));
 
             fetch(scriptURL, { method: 'POST', mode: 'no-cors', body: dadosParaEnviar })
                 .then(() => {
